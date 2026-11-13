@@ -1,50 +1,24 @@
 import "server-only";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
-import { db, nowIso, transaction } from "@/lib/db";
+import { db, nowIso, transaction, withProfile } from "@/lib/db";
 import { errorMessage } from "@/lib/http";
 import { hasTokens } from "@/lib/upwork/auth-provider";
 import { NeedsLogin, withUpwork } from "@/lib/upwork/client";
+import { activeProfile } from "@/lib/session";
 import { parseSearchResponse } from "./parse";
-import { listSearches, recordSearchResult } from "./searches";
-import { getSettings, saveSettings } from "./settings";
-import { upsertJob } from "./jobs";
+import { listSearches, recordSearchResult, seedFromProfile } from "./searches";
+import { getSettings } from "./settings";
+import { reapplyRules, upsertJob } from "./jobs";
 import { hasOpenAI } from "@/lib/ai/openai";
 import { scorePending } from "@/lib/ai/score";
-import { ensureProfileContext } from "@/lib/profile";
-
-export type Account = { org_uid: string; name: string; role: string; role_label: string };
+import { ensureProfileContext, type ProfileContext } from "@/lib/profile";
 
 export type RunSummary = { found: number; newJobs: number; scored?: number; messages: string[] };
 
 const PAUSE_MS = 750; // between Upwork calls, to stay well clear of throttling
 const SCORE_PER_RUN = 30; // caps AI spend per run; the rest are scored next run
 
-function textJson(result: unknown): Record<string, unknown> {
-  const content = (result as { content?: unknown }).content;
-  const item = (Array.isArray(content) ? content : [])[0] as { text?: string } | undefined;
-  return item?.text ? JSON.parse(item.text) : {};
-}
-
-export async function fetchAccounts(client: Client): Promise<Account[]> {
-  const result = await client.callTool({ name: "upwork__list_accounts", arguments: {} });
-  const accounts = textJson(result).accounts;
-  return Array.isArray(accounts) ? (accounts as Account[]) : [];
-}
-
-/** The org to search as; defaults to the freelancer account the first time. */
-export async function resolveOrg(client: Client): Promise<string> {
-  const settings = getSettings();
-  if (settings.orgUid) return settings.orgUid;
-  const accounts = await fetchAccounts(client);
-  const pick = accounts.find((a) => a.role === "TALENT") ?? accounts[0];
-  if (!pick) throw new Error("Upwork returned no accounts for this login.");
-  saveSettings({ orgUid: pick.org_uid, orgLabel: `${pick.name} (${pick.role_label})` });
-  return pick.org_uid;
-}
-
-async function runSearches(client: Client, trigger: string): Promise<RunSummary> {
-  const settings = getSettings();
-  const searches = listSearches().filter((s) => s.enabled);
+async function runSearches(client: Client, orgUid: string, trigger: string): Promise<RunSummary> {
   const summary: RunSummary = { found: 0, newJobs: 0, messages: [] };
   const startedAt = nowIso();
   const runId = Number(
@@ -52,11 +26,25 @@ async function runSearches(client: Client, trigger: string): Promise<RunSummary>
   );
 
   try {
+    // The profile drives everything: the first run sets up searches and rules from it.
+    let ctx: ProfileContext | undefined;
+    try {
+      ctx = await ensureProfileContext(client, orgUid);
+      const note = seedFromProfile(ctx);
+      if (note) summary.messages.push(note);
+    } catch (err) {
+      if (err instanceof NeedsLogin) throw err;
+      summary.messages.push(`Could not load your Upwork profile: ${errorMessage(err)}`);
+    }
+
+    const searches = listSearches().filter((s) => s.enabled);
     if (searches.length === 0) {
       summary.messages.push("No saved searches are enabled. Add one under Searches & rules.");
       return summary;
     }
-    const orgUid = await resolveOrg(client);
+    const settings = getSettings(); // read after seeding, which may fill rules from the profile
+    // Jobs age between runs: re-check stored ones so stale posts drop out (and aren't scored).
+    reapplyRules(settings.rules);
 
     for (const search of searches) {
       const warnings: string[] = [];
@@ -96,9 +84,8 @@ async function runSearches(client: Client, trigger: string): Promise<RunSummary>
       }
     }
 
-    if (hasOpenAI()) {
+    if (hasOpenAI() && ctx) {
       try {
-        const ctx = await ensureProfileContext(client, orgUid);
         const { scored, errors } = await scorePending(ctx, SCORE_PER_RUN);
         summary.scored = scored;
         if (errors.length) summary.messages.push(`AI scoring: ${errors.join("; ")}`);
@@ -120,8 +107,12 @@ const g = globalThis as unknown as { __feedRun?: Promise<RunSummary> };
 export function runFeed(trigger: "manual" | "schedule"): Promise<RunSummary> {
   g.__feedRun ??= (async () => {
     try {
-      if (!(await hasTokens())) return { found: 0, newJobs: 0, messages: ["Not connected to Upwork."] };
-      return await withUpwork((client) => runSearches(client, trigger));
+      const profile = activeProfile();
+      if (!profile || !(await hasTokens())) return { found: 0, newJobs: 0, messages: ["Not connected to Upwork."] };
+      // Pin the run to this profile: every read and write below goes to its database.
+      return await withProfile(profile.orgUid, () =>
+        withUpwork((client) => runSearches(client, profile.orgUid, trigger)),
+      );
     } catch (err) {
       const msg = err instanceof NeedsLogin ? "Upwork session expired. Click Connect Upwork at the top." : errorMessage(err);
       return { found: 0, newJobs: 0, messages: [msg] };

@@ -5,19 +5,22 @@ import { hasTokens } from "@/lib/upwork/auth-provider";
 import { isReadOnlyTool, listAllTools, NeedsLogin, withUpwork } from "@/lib/upwork/client";
 import { errorMessage } from "@/lib/http";
 import { ToolRunner } from "./tool-runner";
+import { Gated } from "../profile-gate";
 
 export default function ToolsPage() {
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Upwork tools</h1>
-      <p className="mb-6 text-sm text-zinc-500">
-        Everything Upwork&apos;s MCP server offers. Read-only tools can be tried here; tools that change things on Upwork are
-        listed but blocked.
-      </p>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Loading tools…</p>}>
-        <ToolList />
-      </Suspense>
-    </main>
+    <Gated>
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Upwork tools</h1>
+        <p className="mb-6 text-sm text-zinc-500">
+          Everything Upwork&apos;s MCP server offers. Read-only tools can be tried here; tools that change things on Upwork are
+          listed but blocked.
+        </p>
+        <Suspense fallback={<p className="text-sm text-zinc-500">Loading tools…</p>}>
+          <ToolList />
+        </Suspense>
+      </main>
+    </Gated>
   );
 }
 

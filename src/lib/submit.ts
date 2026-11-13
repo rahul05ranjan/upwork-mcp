@@ -7,11 +7,11 @@ import { errorMessage } from "@/lib/http";
 import { latestDraft } from "@/lib/feed/drafts";
 import { getJob } from "@/lib/feed/jobs";
 import { parseBudget } from "@/lib/feed/parse";
-import { resolveOrg } from "@/lib/feed/run";
+import { requireOrg } from "@/lib/session";
 import { getSettings } from "@/lib/feed/settings";
 import { rateVsBudget } from "@/lib/health";
 import { ensureProfileContext, getProfileContext } from "@/lib/profile";
-import { findKey, needsConnects, needsPolicyAck, parsePreview } from "@/lib/proposal-preview";
+import { findKey, needsConnects, needsPolicyAck, parsePreview, previewExpired } from "@/lib/proposal-preview";
 import {
   claimForSubmit,
   connectsSpentLast24h,
@@ -45,7 +45,7 @@ export type PrepareInputs = {
 
 export type PrepareResult =
   | { ok: true; submissionId: number }
-  | { ok: false; error: string; kind?: "connects" | "policy" | "already_applied" };
+  | { ok: false; error: string; kind?: "connects" | "policy" | "already_applied" | "fixed_terms" };
 
 const PROPOSAL_STATUSES = ["Accepted", "Pending", "Activated", "Offered", "Hired"];
 
@@ -76,9 +76,26 @@ export async function prepareSubmission(jobId: string, inputs: PrepareInputs): P
   if (inputs.boostConnects !== undefined && (!Number.isInteger(inputs.boostConnects) || inputs.boostConnects < 1)) {
     return { ok: false, error: "Boost must be a whole number of Connects, at least 1." };
   }
+  // Upwork won't build a fixed-price preview without these; ask here instead of
+  // spending a round trip on its "next_step" reply.
+  if (job.job_type === "fixed") {
+    if (!inputs.estimatedDuration) {
+      return { ok: false, kind: "fixed_terms", error: "This is a fixed-price job: choose how long the work will take." };
+    }
+    if (inputs.paymentMode !== "by_project") {
+      return {
+        ok: false,
+        kind: "fixed_terms",
+        error:
+          inputs.paymentMode === "by_milestone"
+            ? "Milestone payments aren't supported here yet. Choose By project."
+            : "This is a fixed-price job: choose how you want to be paid.",
+      };
+    }
+  }
 
   return withUpwork(async (client) => {
-    const orgUid = await resolveOrg(client);
+    const orgUid = requireOrg();
     const check = await preCheck(client, orgUid, jobId);
     if ("existing" in check && check.existing) {
       return { ok: false, kind: "already_applied", error: `Upwork already has a proposal from you for this job (status: ${check.existing}).` } as const;
@@ -111,7 +128,14 @@ export async function prepareSubmission(jobId: string, inputs: PrepareInputs): P
       return { ok: false, error: text } as const;
     }
     const preview = parsePreview(reply.body);
-    if (!preview.previewId) return { ok: false, error: `Upwork returned no preview_id: ${reply.text.slice(0, 500)}` } as const;
+    if (!preview.previewId) {
+      // Upwork asks for missing details with a "next_step" reply instead of a preview.
+      const nextStep = findKey(reply.body, "next_step");
+      if (typeof nextStep === "string" && nextStep) {
+        return { ok: false, error: `Upwork needs more details before it builds a preview: ${nextStep}` } as const;
+      }
+      return { ok: false, error: `Upwork returned no preview_id: ${reply.text.slice(0, 500)}` } as const;
+    }
 
     const budget = parseBudget(job.budget_text ?? undefined);
     const rate = job.job_type === "hourly" ? rateVsBudget(getProfileContext()?.hourlyRate, budget.min, budget.max) : undefined;
@@ -138,6 +162,7 @@ export async function confirmSubmission(submissionId: number, acknowledged: { co
   const s = getSubmission(submissionId);
   if (!s || !s.preview || !s.preview_id) return { ok: false, error: "Preview not found." };
   if (s.status !== "previewed") return { ok: false, error: `This preview is ${s.status}.` };
+  if (previewExpired(s.preview)) return { ok: false, error: "This Upwork preview has expired (they last about 15 minutes). Get a new preview, then approve." };
   const latest = latestSubmission(s.job_id);
   if (latest?.id !== s.id) return { ok: false, error: "There is a newer preview for this job; approve that one." };
   if (!acknowledged.connects) return { ok: false, error: "Confirm the Connects cost first." };
@@ -162,7 +187,7 @@ export async function confirmSubmission(submissionId: number, acknowledged: { co
 
   let reply;
   try {
-    reply = await withUpwork((client) => resolveOrg(client).then((org) => confirmPreview(client, org, s.kind, s.preview_id!)));
+    reply = await withUpwork((client) => confirmPreview(client, requireOrg(), s.kind, s.preview_id!));
   } catch (err) {
     // We can't tell whether Upwork accepted it: keep the row blocking retries.
     markUnknown(s.id, `Outcome unknown: ${errorMessage(err)}. Check your proposals on Upwork before retrying.`);
@@ -179,13 +204,13 @@ export async function confirmSubmission(submissionId: number, acknowledged: { co
 }
 
 export async function acknowledgeProposalPolicy() {
-  const reply = await withUpwork(async (client) => acknowledgePolicy(client, await resolveOrg(client)));
+  const reply = await withUpwork(async (client) => acknowledgePolicy(client, requireOrg()));
   if (reply.isError) throw new Error(reply.text || "Upwork refused the acknowledgement.");
 }
 
 export async function startUpload(jobTitle: string) {
   const reply = await withUpwork(async (client) =>
-    startProposalUpload(client, await resolveOrg(client), `Files to attach to your proposal for "${jobTitle.slice(0, 80)}"`),
+    startProposalUpload(client, requireOrg(), `Files to attach to your proposal for "${jobTitle.slice(0, 80)}"`),
   );
   if (reply.isError) throw new Error(reply.text || "Upwork refused the upload session.");
   const taskId = findKey(reply.body, "task_id");
@@ -196,7 +221,7 @@ export async function startUpload(jobTitle: string) {
 
 export async function checkUpload(taskId: string) {
   const reply = await withUpwork(async (client) =>
-    callRead(client, "upwork__get_upload_status", "get", await resolveOrg(client), { task_id: taskId }),
+    callRead(client, "upwork__get_upload_status", "get", requireOrg(), { task_id: taskId }),
   );
   if (reply.isError) throw new Error(reply.text || "Couldn't read the upload status.");
   const files = (findKey(reply.body, "files") as unknown[] | undefined) ?? [];
@@ -217,7 +242,7 @@ export async function answersForSubmission(submissionId: number) {
   if (!s?.preview?.screeningQuestions.length) return [];
   const job = getJob(s.job_id);
   if (!job) throw new Error("Job not found");
-  const ctx = await withUpwork(async (client) => ensureProfileContext(client, await resolveOrg(client)));
+  const ctx = await withUpwork(async (client) => ensureProfileContext(client, requireOrg()));
   return draftScreeningAnswers(job.raw, s.preview.screeningQuestions, ctx, s.params.cover_letter);
 }
 
@@ -226,7 +251,7 @@ export async function refreshOutcomes(): Promise<{ checked: number }> {
   const sent = listSentSubmissions().filter((s) => s.status === "submitted");
   if (!sent.length) return { checked: 0 };
   return withUpwork(async (client) => {
-    const orgUid = await resolveOrg(client);
+    const orgUid = requireOrg();
     // One pass over recent proposals per status, matched to our jobs by id.
     const nodes: unknown[] = [];
     for (const status of PROPOSAL_STATUSES) {

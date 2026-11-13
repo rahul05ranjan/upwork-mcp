@@ -63,15 +63,19 @@ test("parsePreview finds fields wherever Upwork nests them", () => {
   assert.equal(p.bidStatsNote, "Upgrade to see bids");
   assert.deepEqual(p.screeningQuestions, ["What is your experience with Kotlin?", "Share a Play Store link"]);
   assert.deepEqual(p.unmetQualifications, ["Job Success Score 90%+"]);
-  assert.match(p.additionalPreferences!, /Europe/);
+  assert.deepEqual(p.additionalPreferences, ["regions: Europe", "note: Regions never block applying"]);
   assert.deepEqual(p.boost, {
     available: true,
     reason: undefined,
     recommendation: undefined,
+    rationale: undefined,
     recommendedConnects: 3,
+    minBoostConnects: undefined,
     maxBoostConnects: 24,
+    topSlots: undefined,
     currentTopBids: [12, 8, 5],
     currentTopBidsAvailable: true,
+    suggestedBid: undefined,
     note: "4 paid slots",
   });
   assert.deepEqual(p.notes, ["Present the full preview to the user."]);

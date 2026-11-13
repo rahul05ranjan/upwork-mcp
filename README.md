@@ -70,9 +70,11 @@ Put the OpenAI settings in `.env.local`:
 
 ```
 OPENAI_API_KEY=sk-...
-OPENAI_SCORING_MODEL=gpt-5.4-mini   # optional
-OPENAI_DRAFT_MODEL=gpt-5.5          # optional
+OPENAI_SCORING_MODEL=gpt-6-luna     # optional
+OPENAI_DRAFT_MODEL=gpt-6-luna       # optional; also writes screening answers
 ```
+
+Both default to `gpt-6-luna`.
 
 Drafts are grounded in your Upwork profile, highlights and past proposals, which are fetched read-only and cached for a day.
 They also use the **AI writer** notes on **Searches & rules**.
@@ -84,9 +86,16 @@ The settings page shows the tokens used so far.
 You can run the read-only tools from that page.
 Tools that change anything on Upwork, such as submitting or messaging, are shown but blocked.
 
-All data is in `.data/app.db` (SQLite through Node's built-in `node:sqlite`, which needs Node 24 or newer), and `.data/` is gitignored and readable only by you.
-That includes the OAuth tokens.
-**Disconnect** forgets the tokens.
+Data is kept **per Upwork profile** (SQLite through Node's built-in `node:sqlite`, which needs Node 24 or newer):
+
+- `.data/session.db` holds the OAuth tokens and which profile is active.
+- `.data/profiles/<org_uid>.db` holds everything else for one profile: settings, searches, jobs, scores, drafts and proposals.
+
+`.data/` is gitignored and readable only by you.
+On a profile's first run, its searches come from the profile itself: Upwork's recommendations plus one search for each of the first 5 profile skills.
+The minimum hourly rate rule is set to the profile's rate.
+**Disconnect** forgets the tokens and the active profile, so no jobs or settings are shown until someone connects.
+The profile's file stays on disk and comes back when the same profile connects again.
 To revoke access fully, also remove the app under Upwork → Settings → Connected Apps.
 
 ```bash
@@ -101,7 +110,7 @@ npm run typecheck
 | `APP_URL` | `http://localhost:3000` | Base URL used for the OAuth redirect (`/api/upwork/callback`) |
 | `UPWORK_MCP_URL` | `https://mcp.upwork.com/mcp` | MCP server endpoint |
 
-If you change `APP_URL`, for example when hosting it yourself, delete `.data/upwork-auth.json` so the app registers again with the new redirect URI.
+If you change `APP_URL`, for example when hosting it yourself, click **Disconnect** (or delete `.data/session.db`) so the app registers again with the new redirect URI.
 Before hosting it anywhere other than localhost, put the app behind a login.
 Until then, anyone who can reach the server can use your Upwork session.
 

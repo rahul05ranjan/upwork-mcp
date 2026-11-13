@@ -107,6 +107,8 @@ export function stripUntrustedTags(text: string | undefined): string {
 }
 
 export type Rules = {
+  /** Hide jobs posted longer ago than this; 0 turns it off. Upwork's search has no date filter. */
+  maxAgeHours: number;
   minHourlyRate?: number;
   minFixedBudget?: number;
   minClientSpend?: number;
@@ -121,6 +123,7 @@ export type Rules = {
 export const PROPOSAL_TIERS = ["Fewer than 5", "5 to 10", "10 to 15", "15 to 20", "20 to 50", "50+"];
 
 export const DEFAULT_RULES: Rules = {
+  maxAgeHours: 72,
   requireVerifiedPayment: true,
   skipIfHired: true,
   excludeProposalTiers: ["50+"],
@@ -128,16 +131,30 @@ export const DEFAULT_RULES: Rules = {
   excludeCountries: [],
 };
 
+/** "3 hours", "2 days", "3 years": for filter reasons. */
+function ageText(hours: number): string {
+  if (hours < 48) return `${Math.round(hours)} hours`;
+  const days = hours / 24;
+  return days < 730 ? `${Math.round(days)} days` : `${Math.round(days / 365)} years`;
+}
+
 /**
  * Local rules the Upwork search can't express exactly. Returns the first reason
- * a job is filtered out, or null when it passes.
+ * a job is filtered out, or null when it passes. The age rule depends on `now`,
+ * so stored jobs are re-checked on every run.
  */
-export function evaluateRules(job: UpworkJob, rules: Rules): string | null {
+export function evaluateRules(job: UpworkJob, rules: Rules, now = Date.now()): string | null {
   const client = job.client ?? {};
   const budget = parseBudget(job.budget);
   const isHourly = job.job_type === "hourly" || budget.hourly;
 
   if (job.applied) return "Already applied";
+
+  const posted = Date.parse(job.published_date ?? job.created_date ?? "");
+  if (rules.maxAgeHours > 0 && Number.isFinite(posted)) {
+    const ageHours = (now - posted) / 3_600_000;
+    if (ageHours > rules.maxAgeHours) return `Posted ${ageText(ageHours)} ago (older than ${rules.maxAgeHours} hours)`;
+  }
 
   if (rules.requireVerifiedPayment && client.verification_status && client.verification_status !== "VERIFIED") {
     return "Client payment not verified";

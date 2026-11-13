@@ -1,5 +1,10 @@
 import "server-only";
-import { db } from "@/lib/db";
+import { db, nowIso, transaction } from "@/lib/db";
+import { kvGet, kvSet } from "@/lib/store";
+import type { ProfileContext } from "@/lib/profile";
+import { reapplyRules } from "./jobs";
+import { rulesFromProfile, searchesFromProfile } from "./profile-seed";
+import { getSettings, saveSettings } from "./settings";
 
 export type SearchKind = "search" | "smart";
 
@@ -59,6 +64,33 @@ export function recordSearchResult(id: number, status: "ok" | "warning" | "error
   db()
     .prepare("UPDATE searches SET last_run_at = ?, last_status = ?, last_message = ? WHERE id = ?")
     .run(at, status, message, id);
+}
+
+const SEEDED_KEY = "profile_seeded";
+
+/**
+ * The first time a profile's data is loaded, set up its searches and rules
+ * from the profile itself (skills, hourly rate). Runs once per profile, so
+ * searches the user deletes later are not brought back. Returns a note for the
+ * run log, or undefined when nothing was added.
+ */
+export function seedFromProfile(ctx: ProfileContext): string | undefined {
+  if (kvGet(SEEDED_KEY)) return undefined;
+  const seeds = searchesFromProfile(ctx.skills, listSearches());
+  const settings = getSettings();
+  const rules = rulesFromProfile(settings.rules, ctx.hourlyRate);
+  transaction(() => {
+    for (const s of seeds) createSearch(s.name, s.kind, s.params);
+    kvSet(SEEDED_KEY, { at: nowIso(), searches: seeds.map((s) => s.name), minHourlyRate: rules.minHourlyRate });
+  });
+  if (rules !== settings.rules) {
+    saveSettings({ rules });
+    reapplyRules(rules);
+  }
+  const parts = [];
+  if (seeds.length) parts.push(`added ${seeds.length} search(es): ${seeds.map((s) => s.name).join(", ")}`);
+  if (rules !== settings.rules) parts.push(`min hourly rate set to your profile rate ($${rules.minHourlyRate}/hr)`);
+  return parts.length ? `Set up from your profile: ${parts.join("; ")}.` : undefined;
 }
 
 /** Human-readable one-liner for a search's filters. */

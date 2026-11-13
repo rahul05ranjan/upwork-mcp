@@ -1,25 +1,24 @@
 import { connection } from "next/server";
 import { hasTokens } from "@/lib/upwork/auth-provider";
-import { getSettings } from "@/lib/feed/settings";
+import { activeProfile } from "@/lib/session";
 
 export async function ConnectionBar() {
   await connection();
-  const connected = await hasTokens();
-  const { orgLabel } = getSettings();
+  const profile = (await hasTokens()) ? activeProfile() : undefined;
 
   return (
     <div className="flex items-center gap-3 text-sm">
       <span
         className={`rounded-full px-2.5 py-1 text-xs font-medium ${
-          connected
+          profile
             ? "bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300"
             : "bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300"
         }`}
-        title={orgLabel}
+        title={profile?.label}
       >
-        {connected ? `Connected${orgLabel ? ` · ${orgLabel}` : ""}` : "Not connected"}
+        {profile ? `Connected · ${profile.label}` : "Not connected"}
       </span>
-      {connected ? (
+      {profile ? (
         <form action="/api/upwork/disconnect" method="post">
           <button className="text-xs text-zinc-500 underline-offset-2 hover:underline">Disconnect</button>
         </form>

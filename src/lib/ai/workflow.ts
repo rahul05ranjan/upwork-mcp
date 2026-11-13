@@ -2,7 +2,7 @@ import "server-only";
 import { nowIso } from "@/lib/db";
 import { getJob, saveJobDetails } from "@/lib/feed/jobs";
 import { addDraft, latestDraft } from "@/lib/feed/drafts";
-import { resolveOrg } from "@/lib/feed/run";
+import { requireOrg } from "@/lib/session";
 import { ensureProfileContext, refreshProfileContext } from "@/lib/profile";
 import { withUpwork } from "@/lib/upwork/client";
 import { generateDraft } from "./draft";
@@ -31,14 +31,14 @@ function textJson(result: unknown): Record<string, unknown> {
 
 export async function scoreNow() {
   return withUpwork(async (client) => {
-    const org = await resolveOrg(client);
+    const org = requireOrg();
     const ctx = await ensureProfileContext(client, org);
     return scorePending(ctx, 50);
   });
 }
 
 export async function refreshProfile() {
-  return withUpwork(async (client) => refreshProfileContext(client, await resolveOrg(client)));
+  return withUpwork(async (client) => refreshProfileContext(client, requireOrg()));
 }
 
 /** Full job details from Upwork; cached for a few hours to respect its browse throttle. */
@@ -49,7 +49,7 @@ export async function refreshJobDetails(jobId: string, force = false) {
     return job.details;
   }
   return withUpwork(async (client) => {
-    const org = await resolveOrg(client);
+    const org = requireOrg();
     const result = await client.callTool({ name: "upwork__find_jobs", arguments: { action: "get", org_uid: org, params: { id: jobId } } });
     const details = textJson(result);
     saveJobDetails(jobId, details, nowIso());
@@ -63,7 +63,7 @@ export async function draftJob(jobId: string, instructions?: string) {
   if (!job) throw new Error("Job not found");
 
   const details = await refreshJobDetails(jobId).catch(() => job.details ?? undefined);
-  const ctx = await withUpwork(async (client) => ensureProfileContext(client, await resolveOrg(client)));
+  const ctx = await withUpwork(async (client) => ensureProfileContext(client, requireOrg()));
   const previous = instructions ? latestDraft(jobId)?.cover_letter : undefined;
 
   const { draft, usage } = await generateDraft({ job: job.raw, details: details ?? undefined, ctx, instructions, previous });

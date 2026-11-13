@@ -1,5 +1,6 @@
 import "server-only";
 import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import { isErrorReply } from "@/lib/proposal-preview";
 
 // The ONLY module allowed to call Upwork tools that change anything, and only
 // these actions. confirmPreview is called from exactly one place: the
@@ -35,8 +36,7 @@ function reply(result: unknown): ToolReply {
   } catch {
     // plain-text reply (Upwork uses these for errors)
   }
-  const statusBad = body && typeof body.status === "string" && body.status !== "ok";
-  return { isError: Boolean(r.isError) || Boolean(statusBad), body, text };
+  return { isError: isErrorReply(r.isError, body), body, text };
 }
 
 export type CreateParams = {

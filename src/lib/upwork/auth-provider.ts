@@ -9,17 +9,19 @@ import type {
   OAuthClientMetadata,
   OAuthTokens,
 } from "@modelcontextprotocol/sdk/shared/auth.js";
-import { kvGet, kvSet } from "@/lib/store";
+import { sessionGet, sessionSet } from "@/lib/store";
+import { clearActiveProfile } from "@/lib/session";
 import { appUrl } from "@/lib/config";
 
+// Login state lives in the session store, outside any profile's data.
 const STORE = "upwork-auth";
 
 // Kept async so the provider's shape doesn't depend on the storage backend.
 async function readJson<T>(key: string): Promise<T | undefined> {
-  return kvGet<T>(key);
+  return sessionGet<T>(key);
 }
 async function writeJson(key: string, value: unknown): Promise<void> {
-  kvSet(key, value);
+  sessionSet(key, value);
 }
 
 type AuthState = {
@@ -126,6 +128,8 @@ export async function hasTokens(): Promise<boolean> {
   return Boolean((await load()).tokens?.access_token);
 }
 
+/** Forgets the tokens and the active profile; the profile's data stays on disk for its next login. */
 export async function disconnect(): Promise<void> {
   await writeJson(STORE, {});
+  clearActiveProfile();
 }

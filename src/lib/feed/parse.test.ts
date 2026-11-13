@@ -97,6 +97,18 @@ test("hourly floor keeps jobs whose range reaches the floor, and open-ended ones
   assert.equal(evaluateRules({ ...good, budget: undefined }, rules), null);
 });
 
+test("age rule hides old posts, judged at the given time", () => {
+  const now = Date.parse("2026-11-12T12:00:00Z");
+  const posted = (iso: string) => ({ ...good, published_date: iso });
+  assert.equal(evaluateRules(posted("2026-11-12T09:00:00Z"), rules, now), null, "3 hours old passes");
+  assert.equal(evaluateRules(posted("2026-11-09T13:00:00Z"), rules, now), null, "71 hours old passes");
+  assert.match(evaluateRules(posted("2026-11-08T12:00:00Z"), rules, now) ?? "", /Posted 4 days ago \(older than 72 hours\)/);
+  assert.match(evaluateRules(posted("2023-06-22T14:38:14Z"), rules, now) ?? "", /Posted 3 years ago/);
+  assert.equal(evaluateRules(posted("2023-06-22T14:38:14Z"), { ...rules, maxAgeHours: 0 }, now), null, "0 turns it off");
+  assert.equal(evaluateRules({ ...good, created_date: "2023-01-01T00:00:00Z" }, rules, now) !== null, true, "falls back to created_date");
+  assert.equal(evaluateRules(good, rules, now), null, "no date: not filtered");
+});
+
 test("rating rule ignores clients with no reviews", () => {
   assert.equal(evaluateRules({ ...good, client: { ...good.client, rating: 0, total_reviews: 0 } }, rules), null);
 });

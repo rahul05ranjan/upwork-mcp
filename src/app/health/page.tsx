@@ -4,20 +4,23 @@ import { evaluateHealth, extraFixes, type Condition } from "@/lib/health";
 import { healthInputs } from "@/lib/health-data";
 import { ManualHealthForm } from "./manual-form";
 import { LoadProfileButton } from "./load-profile-button";
+import { Gated } from "../profile-gate";
 
 export default function HealthPage() {
   return (
-    <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Profile health</h1>
-      <p className="mb-6 text-sm text-zinc-500">
-        How visible your proposals are likely to be, checked against the seven conditions in <em>Get Seen on Upwork 2026</em>.
-        That book is an independent buyer-side study of 4,536 proposals, not Upwork&apos;s formula. Use it as a guide, not a
-        guarantee.
-      </p>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Checking…</p>}>
-        <Health />
-      </Suspense>
-    </main>
+    <Gated>
+      <main className="mx-auto w-full max-w-4xl px-4 py-8 sm:px-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Profile health</h1>
+        <p className="mb-6 text-sm text-zinc-500">
+          How visible your proposals are likely to be, checked against the seven conditions in <em>Get Seen on Upwork 2026</em>.
+          That book is an independent buyer-side study of 4,536 proposals, not Upwork&apos;s formula. Use it as a guide, not a
+          guarantee.
+        </p>
+        <Suspense fallback={<p className="text-sm text-zinc-500">Checking…</p>}>
+          <Health />
+        </Suspense>
+      </main>
+    </Gated>
   );
 }
 

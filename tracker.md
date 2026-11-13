@@ -1,6 +1,6 @@
 # Project tracker
 
-Last updated: **2026-11-11**.
+Last updated: **2026-11-12**.
 Read this first when you pick the project up again.
 
 ## Where things stand
@@ -18,7 +18,7 @@ The local Next.js dashboard is connected to Upwork's official MCP server and doe
 |---|---|---|
 | 1. Connect | OAuth 2.1 to `https://mcp.upwork.com/mcp`, plus a tool explorer that blocks write tools | ✅ Done, verified live |
 | 2. Feed | Saved searches and Upwork recommendations on a schedule, filter rules, SQLite | ✅ Done, verified live (40 jobs found, rules filtered 22) |
-| 3. AI | Fit scores (`gpt-5.4-mini`) and grounded drafts (`gpt-5.5`), with an editor and versions | ✅ Done, verified live |
+| 3. AI | Fit scores and grounded drafts, both `gpt-6-luna` since 2026-11-12 (were `gpt-5.4-mini` and `gpt-5.5`), with an editor and versions | ✅ Done, verified live |
 | — | *Get Seen on Upwork 2026* guidance: Profile health page, rate vs budget, letter preview and checks, new draft prompt | ✅ Done, verified live |
 | 4. Bid | Upwork preview, then Approve, screening answers, attachments, boost calculator, Connects limits, proposal log | ⚠️ Built. Refusals and guards verified live; **a real preview and submit are untested** |
 | 5. Learn | Use the outcomes (viewed, replied, hired) to tune prompts | ⏳ Not started |
@@ -26,6 +26,16 @@ The local Next.js dashboard is connected to Upwork's official MCP server and doe
 Code: https://github.com/rahul05ranjan/upwork-mcp (private, `main`).
 
 ## Tomorrow: do these in order
+
+### 0. Reconnect and check the profile split (new on 2026-11-12)
+
+Data is now stored per Upwork profile, so after the update the app shows only **Connect Upwork** until you log in.
+
+1. Click **Connect Upwork** and log in.
+2. Check that the old 41 jobs are back. They moved into `.data/profiles/851793402293047298.db`. `.data/app.db` is the untouched old copy; delete it once everything looks right.
+3. Click **Run now**. The first run should add one search per profile skill (first 5: ExpressJS, Laravel, Node.js, Yii2, CodeIgniter) and set min hourly rate to $15. The run message says what it added.
+4. On **Searches & rules**, check each new search for `filters_ignored` or `filters_rejected` warnings. `proposals_max: 20` has never been tried live. Delete the searches you don't want; they won't come back.
+5. Click **Disconnect**. Every page should show only the connect screen.
 
 ### 1. Start the app
 
@@ -113,6 +123,7 @@ These matter more than any cover letter. The profile currently meets **2 of 7** 
   - It atomically claims the row (`claimForSubmit`).
 - The unique index `submissions_one_live` allows only one submitting or submitted row per job.
 - If the outcome is unknown, for example after a network error during confirm, the row stays `submitting`. That blocks retries, and the user resolves it on the job page after checking Upwork.
+- **Everything is per profile.** `db()` throws `NoProfile` when nobody is connected, and each page is wrapped in `<Gated>`. A feed run pins its profile with `withProfile()`, so switching accounts mid-run can't mix data. Approve sends the page's `org_uid`, and the action refuses it if another profile became active.
 - The tool explorer (`/tools`, `/api/upwork/tools/call`) runs read-only tools only (`isReadOnlyTool`).
 - Job posts, client reviews and profile text come wrapped in `<untrusted_participant_content>`. They reach the model only as data, through `untrusted()`.
 - Secrets are never committed. `.env.local` and `.data/` (tokens and database) are gitignored. Scan the staged diff before pushing.
@@ -127,7 +138,8 @@ These matter more than any cover letter. The profile currently meets **2 of 7** 
 | Feed | `src/lib/feed/run.ts` (runner), `scheduler.ts`, `parse.ts` (budget parsing and rules), `jobs.ts`, `searches.ts`, `settings.ts`, `src/instrumentation.ts` |
 | AI | `src/lib/ai/score.ts`, `draft.ts`, `answers.ts`, `letter-checks.ts`, `openai.ts`, `workflow.ts`; profile context in `src/lib/profile.ts` |
 | Profile health | `src/lib/health.ts` (pure), `src/lib/health-data.ts` |
-| Database | `src/lib/db.ts` (migrations; schema version 3), `src/lib/store.ts` (key/value) |
+| Database | `src/lib/db.ts` (session DB, one DB per profile, migrations; profile schema version 3), `src/lib/store.ts` (profile and session key/value) |
+| Profiles | `src/lib/session.ts` (active profile, account switch, legacy `app.db` import), `src/app/profile-gate.tsx` (`<Gated>` on every page), `src/lib/feed/profile-seed.ts` (searches and rules from the profile) |
 | Pages | `/` jobs, `/jobs/[id]` detail, draft and submit, `/proposals` log, `/health`, `/settings`, `/tools` |
 | Notes | `docs/upwork-mcp-notes.md` (Upwork tool facts and response shapes), `README.md` |
 
@@ -141,8 +153,8 @@ npm run lint
 npm run build
 ```
 
-- Data lives in `.data/app.db` and can be inspected with `node:sqlite`. Tables: `kv`, `searches`, `jobs`, `job_sources`, `runs`, `job_scores`, `drafts`, `submissions`.
-- Adding a migration means appending to `MIGRATIONS` in `src/lib/db.ts`. It applies on the next DB access, even after a hot reload.
+- Data lives in `.data/session.db` (kv: `upwork-auth`, `profile`) and `.data/profiles/<org_uid>.db` (tables: `kv`, `searches`, `jobs`, `job_sources`, `runs`, `job_scores`, `drafts`, `submissions`). Inspect them with `node:sqlite`.
+- Adding a migration means appending to `PROFILE_MIGRATIONS` (or `SESSION_MIGRATIONS`) in `src/lib/db.ts`. It applies on the next DB access, even after a hot reload.
 - **Testing pattern used so far:**
   - Read-only Node scripts against Upwork, using the stored token.
   - Throwaway `src/app/api/tmp-*` routes to call server code from the terminal. Delete them right after.
@@ -150,17 +162,27 @@ npm run build
 
 ## Known gaps and backlog
 
-- [ ] **Successful preview and confirm response shapes have never been seen.** Verify them on the first real submission (step 4 above).
+- [ ] **The confirm response shape has never been seen.** The preview shape is now known (2026-11-12, see `docs/upwork-mcp-notes.md`). Verify confirm on the first real submission (step 4 above).
 - [ ] Fixed-price **milestones** (`payment_mode=by_milestone` with a milestones list) aren't supported. Use "by project".
 - [ ] Outcome matching in `refreshOutcomes` and `preCheck` looks for the job id inside proposal and invitation JSON. Switch to explicit fields once the real shapes are known.
 - [ ] Replies are marked by hand on the Proposals page. They could come from `get_messages` or proposal status later.
 - [ ] Phase 5: use viewed, replied and hired outcomes to rank which letter templates and openings work, and feed winning letters back as style samples.
 - [ ] Optional boost ideas: suggest a bid automatically from `recommended_connects` and the calculator, and track placebo auctions in the log.
-- [ ] Before any hosting: add a login, move the scheduler out of the web process if needed, and set `APP_URL`, then delete the old OAuth client in the kv table so it re-registers.
+- [ ] Before any hosting: add a login, move the scheduler out of the web process if needed, and set `APP_URL`, then Disconnect so the OAuth client re-registers. Hosting for several users also needs the active profile per login, not one per server.
 - [ ] `node:sqlite` prints an "experimental" warning, which is harmless.
 - [ ] There are no automated tests for `submit.ts` and `submissions.ts` against a fake MCP client yet. They were verified by hand on 2026-11-11 (all refusals, plus double-submit protection).
 
 ## Session log
+
+- **2026-11-12:**
+  - Split storage per Upwork profile: `session.db` for login, `profiles/<org_uid>.db` for the rest. Disconnect now hides all data.
+  - New profiles get their searches from their skills, and min hourly rate from their rate, on the first run.
+  - Account switching moved to its own form on Searches & rules.
+  - All AI (scores, drafts, screening answers) now uses `gpt-6-luna` by default.
+  - Fit scores use a rubric: the model gives points for skills (40), pay (20), client (20), competition (10) and clarity (10); the code adds them up and sets the verdict. Cards show the breakdown. Rescored Rahul Arora's 59 jobs (26–69, none "strong"); the other profile still has old scores without a breakdown.
+  - Upwork's skill `search` returned posts up to 3 years old (it has no date filter). Added a **max job age** rule (default 72 hours, re-checked every run) and made **Newest** the default sort. 41 of Rahul Arora's stored jobs dropped out as too old.
+  - Fixed-price jobs: Upwork replies with `next_step` (no preview) until `estimated_duration` and `payment_mode` are sent. The form now requires both (duration pre-filled from the client's estimate, payment "By project"), and the server checks them before calling Upwork.
+  - Imported the old `app.db` into profile 851793402293047298 (its `orgUid` had been cleared by Disconnect and was restored by hand first).
 
 - **2026-11-11:**
   - Planned the project and built Phases 1–4.

@@ -2,10 +2,10 @@ import "server-only";
 import { kvGet, kvSet } from "@/lib/store";
 import { DEFAULT_RULES, type Rules } from "./parse";
 
+// Per-profile settings, stored in the active profile's database. Which Upwork
+// account is active lives in the session (src/lib/session.ts), not here.
+
 export type Settings = {
-  /** Upwork org to act as (freelancer or agency), from list_accounts. */
-  orgUid?: string;
-  orgLabel?: string;
   /** Minutes between automatic runs; 0 turns the scheduler off. */
   intervalMinutes: number;
   /** Result pages (10 jobs each) to read per saved search per run. */
@@ -30,7 +30,10 @@ export const DEFAULT_SETTINGS: Settings = {
 };
 
 export function getSettings(): Settings {
-  const saved = kvGet<Partial<Settings>>(KEY) ?? {};
+  const saved: Partial<Settings> & { orgUid?: string; orgLabel?: string } = kvGet(KEY) ?? {};
+  // orgUid/orgLabel were stored here before profiles were split out; drop them.
+  delete saved.orgUid;
+  delete saved.orgLabel;
   return { ...DEFAULT_SETTINGS, ...saved, rules: { ...DEFAULT_RULES, ...saved.rules } };
 }
 

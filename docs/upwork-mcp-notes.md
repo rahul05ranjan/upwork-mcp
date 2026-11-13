@@ -69,10 +69,53 @@ Rules from Upwork's help text that the app must follow:
   - The app detects this case (`needsConnects`) and shows a buy-Connects link.
 - `get_profile action=connects_balance` returns `balance.connectsBalance` (free plus paid) and `usage_history`.
 - `list_freelancer_proposals action=invitations` accepts `job_posting_id` and returns `data.invitations[]` with `totalCount`.
-- **Not yet seen:** the exact shape of a successful preview and of a `confirm_preview` response.
-  - `src/lib/proposal-preview.ts` finds fields by name at any depth.
-  - The UI also shows the full raw preview.
-  - Recheck both against the first real preview.
+- **Not yet seen:** the shape of a `confirm_preview` response. Record it after the first real submit.
+
+## A successful preview, seen live (2026-11-12)
+
+`manage_proposals create` returned this (values shortened):
+
+```json
+{
+  "status": "preview",
+  "type": "proposal",
+  "preview_id": "3b45…",
+  "expires_at": "2026-11-12T08:52:47Z",
+  "ttl_seconds": 899,
+  "message": "Preview prepared (NOT executed). Present the full preview to the user … preview_id … internal …",
+  "params": { "chargedAmount": 60, "connects_cost": 13, "coverLetter": "…", "jobReference": "…", "selectedContractor": {}, "teamOrgId": "…", "work_history_ids": [] },
+  "review_fields": { "charged_amount": 60, "cover_letter": "…", "job_reference": "…" },
+  "preview": {
+    "can_apply": true, "plan": "Freelancer Basic",
+    "connects_cost": 13, "connects_balance": 197, "charged_amount": 60,
+    "cover_letter": "…", "cover_letter_required": true, "milestones_allowed": false,
+    "additional_preferences": ["Preferred countries: United States"],
+    "additional_preferences_note": "…tell the user each one… ask whether they still want to apply.",
+    "preferred_locations_note": "The client prefers freelancers in United States (advisory — anyone may apply).",
+    "bid_stats_available": false, "bid_stats_note": "…needs Freelancer Plus…",
+    "boost": {
+      "current_top_bids": [30, 4, 3], "top_slots": 4,
+      "min_boost_connects": 3, "max_boost_connects": 184, "recommended_connects": 3,
+      "rationale": "Only 3 applicant(s) have boosted — fewer than the 4 paid slots, so 3 connects … earns you a top slot.",
+      "suggested_bid": { "median_winning_bid": 65, "p80_winning_bid": 151, "p90_winning_bid": 231, "note": "…SIMILAR jobs, not this one…" },
+      "your_balance": 197, "note": "…"
+    },
+    "preview_text": "Cover letter:\n…\n\nBid: $60\n\nPortfolio projects: none\n…\nConnects: 13 (balance 197)",
+    "preview_text_note": "…belongs in the message to them in full and unedited…",
+    "screening_answers": [], "attachments": [], "certificates": [], "portfolio_projects": [], "work_history": [{ "id": "…", "title": "<untrusted_participant_content>…" }]
+  }
+}
+```
+
+What the app relies on:
+
+- **`status` is `"preview"` on success, not `"ok"`.** Only an error status (`error`, `failed`…), an `error` field or `isError` counts as a failure (`isErrorReply`).
+- **The preview expires** after about 15 minutes (`expires_at`). Approve refuses an expired preview; get a new one.
+- **`preview_text` is what the client receives.** Upwork requires the user to see it in full and unedited, so the approval screen shows it.
+- **`boost` has no `available` flag.** A `max_boost_connects` above 0 means boosting is open. Bids must be between `min_boost_connects` and `max_boost_connects`. `suggested_bid` describes similar jobs, never this one.
+- **`additional_preferences`** are client preferences the profile may not meet. Ask the user whether they still want to apply.
+- The top-level `message` and the `*_note` fields are instructions for an AI agent, so they aren't shown to the user as they are.
+- Work-history titles in `preview_text` keep Upwork's `<untrusted_participant_content>` tags; the app strips them for display.
 
 ## Other useful read tools
 

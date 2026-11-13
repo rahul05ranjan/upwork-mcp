@@ -24,9 +24,13 @@ export type SubmissionView = Pick<
 >;
 
 type Props = {
+  /** The profile this page was rendered for; Approve is refused if another profile is active by then. */
+  orgUid: string;
   jobId: string;
   jobTitle: string;
   isFixed: boolean;
+  /** The client's duration estimate, e.g. "3 to 6 months". */
+  jobDuration: string | null;
   proposalsTier: string | null;
   latestDraftId: number | null;
   latestDraftBid: number | null;
@@ -38,6 +42,16 @@ type Props = {
 };
 
 const BUY_CONNECTS = "https://www.upwork.com/nx/plans/connects/";
+
+/** Upwork's posted duration ("3 to 6 months") as an estimated_duration value. */
+function durationFromJob(text: string | null): string {
+  const t = (text ?? "").toLowerCase();
+  if (t.includes("less than 1")) return "less_than_1_month";
+  if (t.includes("1 to 3")) return "1_to_3_months";
+  if (t.includes("3 to 6")) return "3_to_6_months";
+  if (t.includes("more than 6")) return "more_than_6_months";
+  return "";
+}
 
 export function SubmitPanel(p: Props) {
   const s = p.submission;
@@ -101,8 +115,9 @@ function PrepareAndApprove(p: Props) {
   const [attachMode, setAttachMode] = useState<"" | "none" | "files">(s?.params.attachments?.length ? "files" : "");
   const [fileUids, setFileUids] = useState<string[]>(s?.params.attachments ?? []);
   const [method, setMethod] = useState<string>(s?.params.application_method ?? "");
-  const [duration, setDuration] = useState<string>(s?.params.estimated_duration ?? "");
-  const [mode, setMode] = useState<string>(s?.params.payment_mode ?? "");
+  // Fixed-price jobs always need both; start from the client's own duration estimate.
+  const [duration, setDuration] = useState<string>(s?.params.estimated_duration ?? (p.isFixed ? durationFromJob(p.jobDuration) : ""));
+  const [mode, setMode] = useState<string>(s?.params.payment_mode ?? (p.isFixed ? "by_project" : ""));
   const [profit, setProfit] = useState<string>(String(Math.round((p.latestDraftBid ?? 0) * (p.isFixed ? 1 : 20))));
   const [upload, setUpload] = useState<{ taskId: string; url: string } | null>(null);
   const [uploadMsg, setUploadMsg] = useState<string>();
@@ -260,7 +275,7 @@ function PrepareAndApprove(p: Props) {
               <input
                 name="boost_connects"
                 type="number"
-                min={preview.boost.recommendedConnects ?? 1}
+                min={preview.boost.minBoostConnects ?? 1}
                 max={preview.boost.maxBoostConnects}
                 value={boost}
                 onChange={(e) => setBoost(e.target.value)}
@@ -271,22 +286,24 @@ function PrepareAndApprove(p: Props) {
           {p.isFixed && (
             <>
               <label className="block text-sm">
-                <span className="mb-1 block font-medium">Estimated duration</span>
-                <select name="estimated_duration" value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass}>
-                  <option value="">Only if Upwork asks</option>
+                <span className="mb-1 block font-medium">How long will it take?</span>
+                <select name="estimated_duration" required value={duration} onChange={(e) => setDuration(e.target.value)} className={inputClass}>
+                  <option value="" disabled>
+                    Choose…
+                  </option>
                   <option value="less_than_1_month">Less than 1 month</option>
                   <option value="1_to_3_months">1–3 months</option>
                   <option value="3_to_6_months">3–6 months</option>
                   <option value="more_than_6_months">More than 6 months</option>
                 </select>
+                {p.jobDuration && <span className="mt-1 block text-xs text-zinc-500">Client&apos;s estimate: {p.jobDuration}</span>}
               </label>
               <label className="block text-sm">
                 <span className="mb-1 block font-medium">Payment</span>
-                <select name="payment_mode" value={mode} onChange={(e) => setMode(e.target.value)} className={inputClass}>
-                  <option value="">Only if Upwork asks</option>
-                  <option value="by_project">By project</option>
-                  <option value="by_milestone">By milestone (not supported here yet)</option>
+                <select name="payment_mode" required value={mode} onChange={(e) => setMode(e.target.value)} className={inputClass}>
+                  <option value="by_project">By project (whole amount on delivery)</option>
                 </select>
+                <span className="mt-1 block text-xs text-zinc-500">Milestones aren&apos;t supported here yet.</span>
               </label>
             </>
           )}
@@ -335,21 +352,45 @@ function PrepareAndApprove(p: Props) {
       {/* ---- Step 2: review + approve ---- */}
       {preview && s?.status === "previewed" && (
         <div className="space-y-4 border-t border-zinc-200 pt-4 dark:border-zinc-800">
-          <h3 className="font-semibold">Upwork preview</h3>
-          <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-4">
+          <div className="flex flex-wrap items-baseline justify-between gap-2">
+            <h3 className="font-semibold">Upwork preview</h3>
+            {preview.expiresAt && (
+              <span className="text-xs text-zinc-500">
+                Valid until <LocalTime iso={preview.expiresAt} /> (about 15 minutes); after that, get a new preview.
+              </span>
+            )}
+          </div>
+          <dl className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
             <Stat label="Connects to apply" value={preview.connectsCost} strong />
             <Stat label="Your balance" value={preview.connectsBalance} strong />
+            <Stat label="Your bid" value={preview.chargedAmount !== undefined ? `$${preview.chargedAmount}` : undefined} strong />
             <Stat label="Can apply" value={preview.canApply === undefined ? undefined : preview.canApply ? "Yes" : "No"} />
             <Stat label="Plan" value={preview.plan} />
           </dl>
-          {preview.bidStatsNote && <p className="text-xs text-zinc-500">{preview.bidStatsNote}</p>}
-          {preview.unmetQualifications.length > 0 && (
-            <div className="text-sm">
-              <p className="font-medium text-amber-700 dark:text-amber-400">Client&apos;s preferred qualifications you don&apos;t meet:</p>
-              <ul className="list-disc pl-5">{preview.unmetQualifications.map((q, i) => <li key={i}>{q}</li>)}</ul>
+          {(preview.unmetQualifications.length > 0 || preview.additionalPreferences.length > 0) && (
+            <div className="rounded-md border border-amber-300 bg-amber-50 p-3 text-sm dark:border-amber-900 dark:bg-amber-950/40">
+              <p className="font-medium text-amber-800 dark:text-amber-300">
+                The client prefers things your profile may not meet. Do you still want to apply?
+              </p>
+              <ul className="mt-1 list-disc pl-5">
+                {[...preview.unmetQualifications, ...preview.additionalPreferences].map((q, i) => (
+                  <li key={i}>{q}</li>
+                ))}
+              </ul>
             </div>
           )}
-          {preview.additionalPreferences && <p className="text-xs text-zinc-500">Other preferences: {preview.additionalPreferences}</p>}
+
+          {preview.previewText && (
+            <div className="text-sm">
+              <p className="mb-1 font-medium">What the client will receive (exactly as Upwork will send it)</p>
+              <pre className="max-h-96 overflow-auto whitespace-pre-wrap rounded-md border border-zinc-200 bg-zinc-50 p-3 font-sans text-sm dark:border-zinc-800 dark:bg-zinc-900">
+                {preview.previewText}
+              </pre>
+            </div>
+          )}
+          {preview.bidStatsAvailable === false && (
+            <p className="text-xs text-zinc-500">What other applicants bid needs Freelancer Plus, so it isn&apos;t shown.</p>
+          )}
 
           {preview.boost && (
             <div className="rounded-md border border-zinc-200 p-3 text-sm dark:border-zinc-800">
@@ -359,17 +400,32 @@ function PrepareAndApprove(p: Props) {
               ) : (
                 <>
                   <p className="text-zinc-600 dark:text-zinc-400">
-                    Current top bids:{" "}
-                    {preview.boost.currentTopBidsAvailable === false
-                      ? "unknown"
-                      : preview.boost.currentTopBids?.length
-                        ? preview.boost.currentTopBids.join(", ")
-                        : "nobody has boosted"}
-                    {preview.boost.recommendedConnects !== undefined && ` · smallest bid for a top slot: ${preview.boost.recommendedConnects}`}
-                    {preview.boost.maxBoostConnects !== undefined && ` · max: ${preview.boost.maxBoostConnects}`}
-                    {preview.boost.recommendation && ` · Upwork: ${preview.boost.recommendation}`}
+                    Bids on this job now:{" "}
+                    <strong>
+                      {preview.boost.currentTopBidsAvailable === false
+                        ? "unknown"
+                        : preview.boost.currentTopBids?.length
+                          ? preview.boost.currentTopBids.join(", ")
+                          : "nobody has boosted"}
+                    </strong>
+                    {preview.boost.topSlots !== undefined && ` · ${preview.boost.topSlots} paid top slots`}
+                    {preview.boost.recommendedConnects !== undefined && ` · Upwork recommends: ${preview.boost.recommendedConnects}`}
+                    {` · allowed: ${preview.boost.minBoostConnects ?? 1}–${preview.boost.maxBoostConnects ?? "?"}`}
                   </p>
-                  {preview.boost.note && <p className="text-xs text-zinc-500">{preview.boost.note}</p>}
+                  {(preview.boost.rationale ?? preview.boost.recommendation) && (
+                    <p className="text-xs text-zinc-600 dark:text-zinc-400">Upwork: {preview.boost.rationale ?? preview.boost.recommendation}</p>
+                  )}
+                  {preview.boost.suggestedBid?.median !== undefined && (
+                    <p className="text-xs text-zinc-500">
+                      For context only: on <em>similar</em> jobs last week, winning bids had a median of {preview.boost.suggestedBid.median}
+                      {preview.boost.suggestedBid.p80 !== undefined && ` (80th percentile ${preview.boost.suggestedBid.p80})`} Connects.
+                      These are not bids on this job.
+                    </p>
+                  )}
+                  <p className="text-xs text-zinc-500">
+                    A boost is an auction bid, not a fee: Upwork charges it only if you land a top slot or the client engages your
+                    proposal before the auction closes. It can&apos;t be raised after submitting.
+                  </p>
                   <div className="mt-2 flex flex-wrap items-center gap-2 text-xs">
                     <span>Profit if you win this job ($):</span>
                     <input type="number" min={0} value={profit} onChange={(e) => setProfit(e.target.value)} className={`${inputClass} w-28`} />
@@ -407,6 +463,7 @@ function PrepareAndApprove(p: Props) {
             className="space-y-3 rounded-md border-2 border-emerald-600/40 p-3"
           >
             <input type="hidden" name="submission_id" value={s.id} />
+            <input type="hidden" name="org_uid" value={p.orgUid} />
             <input type="hidden" name="ack_attachments" value={attachMode ? "on" : ""} />
             <label className="flex items-start gap-2 text-sm">
               <input type="checkbox" name="ack_connects" required className="mt-0.5 h-4 w-4 accent-emerald-600" />

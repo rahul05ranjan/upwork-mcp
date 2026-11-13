@@ -5,24 +5,27 @@ import { listSentSubmissions } from "@/lib/submissions";
 import { setRepliedAction } from "../actions";
 import { RefreshOutcomesButton } from "./refresh-button";
 import { LocalTime } from "../local-time";
+import { Gated } from "../profile-gate";
 
 export default function ProposalsPage() {
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
-      <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Proposals</h1>
-          <p className="text-sm text-zinc-500">
-            Every proposal sent from here. Judge changes over at least 20 proposals: about 25–30% viewed is healthy, under 5% means
-            something on the profile is wrong (Get Seen on Upwork, ch. 7).
-          </p>
+    <Gated>
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        <div className="mb-6 flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <h1 className="text-2xl font-semibold tracking-tight">Proposals</h1>
+            <p className="text-sm text-zinc-500">
+              Every proposal sent from here. Judge changes over at least 20 proposals: about 25–30% viewed is healthy, under 5% means
+              something on the profile is wrong (Get Seen on Upwork, ch. 7).
+            </p>
+          </div>
+          <RefreshOutcomesButton />
         </div>
-        <RefreshOutcomesButton />
-      </div>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
-        <Log />
-      </Suspense>
-    </main>
+        <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
+          <Log />
+        </Suspense>
+      </main>
+    </Gated>
   );
 }
 

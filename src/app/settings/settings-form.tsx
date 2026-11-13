@@ -2,34 +2,17 @@
 
 import { useActionState } from "react";
 import { PROPOSAL_TIERS } from "@/lib/feed/parse";
-import type { Account } from "@/lib/feed/run";
 import type { Settings } from "@/lib/feed/settings";
 import { saveSettingsAction, type FormState } from "../actions";
 import { Check, Field, FormMessage, inputClass, submitClass } from "./fields";
 
-export function SettingsForm({ settings, accounts }: { settings: Settings; accounts: Account[] }) {
+export function SettingsForm({ settings }: { settings: Settings }) {
   const [state, action, pending] = useActionState<FormState, FormData>(saveSettingsAction, {});
   const r = settings.rules;
 
   return (
     <form action={action} className="space-y-6">
       <div className="grid gap-4 sm:grid-cols-3">
-        <Field
-          label="Upwork account"
-          hint={accounts.length ? "Searches and later proposals use this account." : "Connect Upwork to choose."}
-        >
-          <select name="org_uid" defaultValue={settings.orgUid ?? ""} className={inputClass} disabled={!accounts.length}>
-            {!settings.orgUid && <option value="">Freelancer account (default)</option>}
-            {accounts.map((a) => (
-              <option key={a.org_uid} value={a.org_uid}>
-                {a.name} ({a.role_label})
-              </option>
-            ))}
-          </select>
-          {accounts.map((a) => (
-            <input key={a.org_uid} type="hidden" name={`org_label_${a.org_uid}`} value={`${a.name} (${a.role_label})`} />
-          ))}
-        </Field>
         <Field label="Run every (minutes)" hint="0 turns automatic runs off. Minimum 10.">
           <input name="interval_minutes" type="number" min={0} defaultValue={settings.intervalMinutes} className={inputClass} />
         </Field>
@@ -56,6 +39,9 @@ export function SettingsForm({ settings, accounts }: { settings: Settings; accou
       <fieldset className="space-y-4">
         <legend className="mb-2 text-sm font-semibold">Filter rules</legend>
         <div className="grid gap-4 sm:grid-cols-4">
+          <Field label="Max job age (hours)" hint="Hides older posts; early proposals get seen most. 0 turns it off.">
+            <input name="max_age_hours" type="number" min={0} defaultValue={r.maxAgeHours} className={inputClass} />
+          </Field>
           <Field label="Min hourly rate ($)" hint="Hides hourly jobs whose top rate is lower.">
             <input name="min_hourly_rate" type="number" min={1} step="any" defaultValue={r.minHourlyRate} className={inputClass} />
           </Field>

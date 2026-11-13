@@ -12,13 +12,15 @@ import { timeAgo } from "@/lib/format";
 import { errorMessage } from "@/lib/http";
 import { getProfileContext } from "@/lib/profile";
 import { setJobStatusAction } from "../../actions";
-import { ScoreBadge } from "../../score-badge";
+import { ScoreBadge, ScoreBreakdown } from "../../score-badge";
 import { DraftPanel } from "./draft-panel";
 import { SubmitPanel, type SubmissionView } from "./submit-panel";
 import { getSettings } from "@/lib/feed/settings";
+import { requireOrg } from "@/lib/session";
 import { evaluateHealth } from "@/lib/health";
 import { healthInputs } from "@/lib/health-data";
 import { connectsSpentLast24h, latestSubmission, type Submission } from "@/lib/submissions";
+import { Gated } from "../../profile-gate";
 
 /** Only plain, serializable fields go to the client. */
 function submissionView(s: Submission | undefined): SubmissionView | null {
@@ -40,14 +42,16 @@ function submissionView(s: Submission | undefined): SubmissionView | null {
 
 export default function JobPage({ params }: PageProps<"/jobs/[id]">) {
   return (
-    <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
-      <Link href="/" className="text-sm text-zinc-500 hover:underline">
-        ← Jobs
-      </Link>
-      <Suspense fallback={<p className="mt-4 text-sm text-zinc-500">Loading job…</p>}>
-        <JobView params={params} />
-      </Suspense>
-    </main>
+    <Gated>
+      <main className="mx-auto w-full max-w-6xl px-4 py-8 sm:px-6">
+        <Link href="/" className="text-sm text-zinc-500 hover:underline">
+          ← Jobs
+        </Link>
+        <Suspense fallback={<p className="mt-4 text-sm text-zinc-500">Loading job…</p>}>
+          <JobView params={params} />
+        </Suspense>
+      </main>
+    </Gated>
   );
 }
 
@@ -124,6 +128,7 @@ async function JobView({ params }: Pick<PageProps<"/jobs/[id]">, "params">) {
         {job.score && (
           <div className="rounded-lg border border-zinc-200 p-4 text-sm dark:border-zinc-800">
             <p className="font-medium">AI fit: {job.score.summary}</p>
+            {job.score.breakdown && <ScoreBreakdown breakdown={job.score.breakdown} detailed />}
             {job.score.reasons.length > 0 && (
               <ul className="mt-2 list-disc space-y-0.5 pl-5 text-zinc-600 dark:text-zinc-400">
                 {job.score.reasons.map((r, i) => <li key={i}>{r}</li>)}
@@ -226,9 +231,11 @@ async function JobView({ params }: Pick<PageProps<"/jobs/[id]">, "params">) {
           detailsFetchedAt={job.details_fetched_at}
         />
         <SubmitPanel
+          orgUid={requireOrg()}
           jobId={job.id}
           jobTitle={job.title}
-          isFixed={job.job_type !== "hourly"}
+          isFixed={job.job_type === "fixed"}
+          jobDuration={job.duration}
           proposalsTier={job.proposals_tier}
           latestDraftId={drafts[0]?.id ?? null}
           latestDraftBid={drafts[0]?.bid_amount ?? null}

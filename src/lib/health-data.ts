@@ -1,7 +1,7 @@
 import "server-only";
 import { db } from "@/lib/db";
 import { parseMoney } from "@/lib/feed/parse";
-import { getSettings } from "@/lib/feed/settings";
+import { activeProfile } from "@/lib/session";
 import { getProfileContext, type ProfileContext } from "@/lib/profile";
 import { kvGet, kvSet } from "@/lib/store";
 import { median, type HealthInputs, type ManualHealth } from "./health";
@@ -39,7 +39,7 @@ function lastContractDate(ctx: ProfileContext): string | undefined {
 
 export function healthInputs(): { inputs: HealthInputs; profileLoaded: boolean } {
   const ctx = getProfileContext();
-  const { orgLabel } = getSettings();
+  const orgLabel = activeProfile()?.label;
   const typical = typicalFeedRate();
   const earnedAmount = parseMoney(ctx?.totals.earnings);
   return {

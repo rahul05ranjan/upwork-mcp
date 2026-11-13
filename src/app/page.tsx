@@ -4,7 +4,7 @@ import { connection } from "next/server";
 import { countJobs, JOB_VIEWS, listJobs, type JobRow, type JobSort, type JobView } from "@/lib/feed/jobs";
 import { hasOpenAI } from "@/lib/ai/openai";
 import { timeAgo } from "@/lib/format";
-import { ScoreBadge } from "./score-badge";
+import { ScoreBadge, ScoreBreakdown } from "./score-badge";
 import { ScoreNowButton } from "./score-now-button";
 import { parseBudget, parseMoney, stripUntrustedTags } from "@/lib/feed/parse";
 import { rateVsBudget } from "@/lib/health";
@@ -13,6 +13,7 @@ import { lastRun } from "@/lib/feed/run";
 import { listSearches } from "@/lib/feed/searches";
 import { setJobStatusAction } from "./actions";
 import { RunNowButton } from "./run-now-button";
+import { Gated } from "./profile-gate";
 
 const VIEW_LABELS: Record<JobView, string> = {
   new: "New",
@@ -24,11 +25,13 @@ const VIEW_LABELS: Record<JobView, string> = {
 
 export default function JobsPage({ searchParams }: PageProps<"/">) {
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
-      <Suspense fallback={<p className="text-sm text-zinc-500">Loading jobs…</p>}>
-        <Jobs searchParams={searchParams} />
-      </Suspense>
-    </main>
+    <Gated>
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        <Suspense fallback={<p className="text-sm text-zinc-500">Loading jobs…</p>}>
+          <Jobs searchParams={searchParams} />
+        </Suspense>
+      </main>
+    </Gated>
   );
 }
 
@@ -37,7 +40,8 @@ async function Jobs({ searchParams }: Pick<PageProps<"/">, "searchParams">) {
   const params = await searchParams;
   const error = typeof params.error === "string" ? params.error : undefined;
   const view = (JOB_VIEWS as string[]).includes(params.view as string) ? (params.view as JobView) : "new";
-  const sort: JobSort = params.sort === "newest" ? "newest" : "score";
+  // Newest first by default: on Upwork the earliest proposals get seen most.
+  const sort: JobSort = params.sort === "score" ? "score" : "newest";
 
   const counts = countJobs();
   const jobs = listJobs(view, sort);
@@ -98,7 +102,7 @@ async function Jobs({ searchParams }: Pick<PageProps<"/">, "searchParams">) {
         ))}
         <span className="ml-auto pb-2 text-xs text-zinc-500">
           Sort:{" "}
-          {(["score", "newest"] as const).map((s) => (
+          {(["newest", "score"] as const).map((s) => (
             <Link
               key={s}
               href={viewHref(view, s)}
@@ -179,6 +183,7 @@ function JobCard({ job, view, myRate }: { job: JobRow; view: JobView; myRate?: n
           )}
         </p>
       )}
+      {job.score?.breakdown && <ScoreBreakdown breakdown={job.score.breakdown} />}
 
       {job.snippet && (
         <p className="mt-2 line-clamp-3 whitespace-pre-line text-sm text-zinc-600 dark:text-zinc-400">
@@ -245,7 +250,7 @@ function StatusButtons({ job, view }: { job: JobRow; view: JobView }) {
 function viewHref(view: JobView, sort: JobSort): string {
   const q = new URLSearchParams();
   if (view !== "new") q.set("view", view);
-  if (sort !== "score") q.set("sort", sort);
+  if (sort !== "newest") q.set("sort", sort);
   const s = q.toString();
   return s ? `/?${s}` : "/";
 }

@@ -5,7 +5,7 @@ import { PROPOSAL_TIERS, type Rules } from "@/lib/feed/parse";
 import { reapplyRules, setJobStatus } from "@/lib/feed/jobs";
 import { runFeed, type RunSummary } from "@/lib/feed/run";
 import { createSearch, deleteSearch, setSearchEnabled } from "@/lib/feed/searches";
-import { getSettings, saveSettings } from "@/lib/feed/settings";
+import { saveSettings } from "@/lib/feed/settings";
 import { addDraft, latestDraft } from "@/lib/feed/drafts";
 import { COVER_LETTER_MAX } from "@/lib/ai/draft";
 import { draftJob, refreshJobDetails, refreshProfile, scoreNow } from "@/lib/ai/workflow";
@@ -21,7 +21,9 @@ import {
   startUpload,
 } from "@/lib/submit";
 import { resolveUnknown, setReplied } from "@/lib/submissions";
-import { NeedsLogin } from "@/lib/upwork/client";
+import { NeedsLogin, withUpwork } from "@/lib/upwork/client";
+import { currentOrg } from "@/lib/db";
+import { accountLabel, fetchAccounts, setActiveProfile } from "@/lib/session";
 
 // Local single-user app: Next.js already rejects cross-origin Server Action
 // calls. Add a login check here before hosting it anywhere public.
@@ -226,6 +228,7 @@ export async function prepareSubmissionAction(_prev: SubmitFormState, form: Form
       attachments: list(form, "attachments"),
       applicationMethod: method === "cover_letter" || method === "ai_interview" ? method : undefined,
       estimatedDuration: ["less_than_1_month", "1_to_3_months", "3_to_6_months", "more_than_6_months"].includes(duration) ? duration : undefined,
+      // by_milestone needs a milestones list, which isn't built yet; prepareSubmission refuses it.
       paymentMode: mode === "by_project" || mode === "by_milestone" ? mode : undefined,
     });
     refresh();
@@ -237,6 +240,11 @@ export async function prepareSubmissionAction(_prev: SubmitFormState, form: Form
 
 export async function confirmSubmissionAction(_prev: SubmitFormState, form: FormData): Promise<SubmitFormState> {
   try {
+    // Submission ids are per profile: if another account became active since
+    // this page loaded, the same id could be a different job's preview.
+    if (str(form, "org_uid") !== currentOrg()) {
+      return { error: "You switched Upwork accounts since this page loaded. Reload the job and check the preview again." };
+    }
     const res = await confirmSubmission(Number(str(form, "submission_id")), {
       connects: form.get("ack_connects") === "on",
       attachments: form.get("ack_attachments") === "on",
@@ -319,6 +327,19 @@ export async function saveHealthManualAction(_prev: FormState, form: FormData): 
   return { ok: "Saved." };
 }
 
+// ---- Account ----
+
+/** Makes another org on the same login the active profile; its own data then shows everywhere. */
+export async function switchAccountAction(form: FormData): Promise<void> {
+  const orgUid = str(form, "org_uid");
+  if (!orgUid || orgUid === currentOrg()) return;
+  // Only orgs Upwork lists for this login, never a value typed into the form.
+  const account = (await withUpwork(fetchAccounts)).find((a) => a.org_uid === orgUid);
+  if (!account) return;
+  setActiveProfile({ orgUid: account.org_uid, label: accountLabel(account) });
+  refresh();
+}
+
 // ---- Searches ----
 
 export async function toggleSearchAction(form: FormData): Promise<void> {
@@ -342,6 +363,7 @@ export async function saveSettingsAction(_prev: FormState, form: FormData): Prom
     if (minRating !== undefined && minRating > 5) return { error: "Client rating is out of 5." };
 
     const rules: Rules = {
+      maxAgeHours: wholeNumber(form, "max_age_hours") ?? 0,
       minHourlyRate: positive(form, "min_hourly_rate"),
       minFixedBudget: positive(form, "min_fixed_budget"),
       minClientSpend: positive(form, "min_client_spend"),
@@ -358,9 +380,6 @@ export async function saveSettingsAction(_prev: FormState, form: FormData): Prom
     const winRate = positive(form, "win_rate_percent") ?? 3;
     if (winRate > 100) return { error: "Win rate is a percentage (0–100)." };
 
-    const orgUid = str(form, "org_uid");
-    const orgLabel = str(form, "org_label_" + orgUid);
-    const current = getSettings();
     saveSettings({
       intervalMinutes: interval,
       pagesPerSearch: pages,
@@ -368,7 +387,6 @@ export async function saveSettingsAction(_prev: FormState, form: FormData): Prom
       maxConnectsPerProposal: maxPerProposal,
       maxConnectsPerDay: maxPerDay,
       winRatePercent: winRate,
-      ...(orgUid ? { orgUid, orgLabel: orgLabel || current.orgLabel } : {}),
     });
     reapplyRules(rules);
     refresh();

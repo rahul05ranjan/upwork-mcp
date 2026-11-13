@@ -1,6 +1,7 @@
 import "server-only";
 import { lastRun, runFeed } from "./run";
 import { getSettings } from "./settings";
+import { activeProfile } from "@/lib/session";
 
 // Checks once a minute whether a run is due. Reading the interval on every tick
 // means a settings change takes effect without restarting the server.
@@ -10,6 +11,8 @@ const g = globalThis as unknown as { __feedScheduler?: NodeJS.Timeout };
 
 async function tick() {
   try {
+    // Nobody connected: there is no profile to search for.
+    if (!activeProfile()) return;
     const { intervalMinutes } = getSettings();
     if (!intervalMinutes) return;
     const last = lastRun();

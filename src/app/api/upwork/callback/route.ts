@@ -1,6 +1,7 @@
 import type { NextRequest } from "next/server";
 import { consumeOAuthState } from "@/lib/upwork/auth-provider";
-import { finishLogin } from "@/lib/upwork/client";
+import { finishLogin, withUpwork } from "@/lib/upwork/client";
+import { selectProfileAfterLogin } from "@/lib/session";
 import { errorMessage, redirectHome } from "@/lib/http";
 
 // Upwork redirects the browser here after the user approves access.
@@ -21,6 +22,8 @@ export async function GET(req: NextRequest) {
 
   try {
     await finishLogin(code);
+    // Always re-pick the profile: this login may be a different Upwork user.
+    await withUpwork(selectProfileAfterLogin);
     return redirectHome({ connected: "1" });
   } catch (err) {
     return redirectHome({ error: `Could not finish Upwork login: ${errorMessage(err)}` });

@@ -1,9 +1,11 @@
 import "server-only";
 import OpenAI from "openai";
 
-// Models are configurable in .env.local; defaults are ones this key can use.
-export const SCORING_MODEL = process.env.OPENAI_SCORING_MODEL ?? "gpt-5.4-mini";
-export const DRAFT_MODEL = process.env.OPENAI_DRAFT_MODEL ?? "gpt-5.5";
+// One model for everything by default (scoring, drafts, screening answers);
+// each can still be overridden in .env.local.
+const DEFAULT_MODEL = "gpt-6-luna";
+export const SCORING_MODEL = process.env.OPENAI_SCORING_MODEL ?? DEFAULT_MODEL;
+export const DRAFT_MODEL = process.env.OPENAI_DRAFT_MODEL ?? DEFAULT_MODEL;
 
 export function hasOpenAI(): boolean {
   return Boolean(process.env.OPENAI_API_KEY);

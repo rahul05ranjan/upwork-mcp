@@ -1,6 +1,7 @@
 import "server-only";
 import { db, transaction } from "@/lib/db";
 import { evaluateRules, parseBudget, type Rules, type UpworkClient, type UpworkJob } from "./parse";
+import type { Breakdown } from "@/lib/ai/score-rubric";
 
 export type JobStatus = "new" | "shortlisted" | "skipped" | "applied";
 export type JobView = JobStatus | "filtered";
@@ -34,13 +35,16 @@ export type ScoreRow = {
   reasons: string[];
   red_flags: string[];
   model: string;
+  /** Points per rubric factor; null for scores made before the rubric. */
+  breakdown: Breakdown | null;
 };
 
 const SELECT_JOB = `
   SELECT j.*,
     (SELECT json_group_array(s.name) FROM job_sources js JOIN searches s ON s.id = js.search_id WHERE js.job_id = j.id) AS sources,
     (SELECT json_object('score', sc.score, 'verdict', sc.verdict, 'summary', sc.summary,
-                        'reasons', json(sc.reasons), 'red_flags', json(sc.red_flags), 'model', sc.model)
+                        'reasons', json(sc.reasons), 'red_flags', json(sc.red_flags), 'model', sc.model,
+                        'breakdown', json(sc.breakdown))
        FROM job_scores sc WHERE sc.job_id = j.id) AS score_json
   FROM jobs j`;
 

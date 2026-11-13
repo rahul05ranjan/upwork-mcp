@@ -2,16 +2,18 @@ import { Suspense } from "react";
 import { connection } from "next/server";
 import { hasTokens } from "@/lib/upwork/auth-provider";
 import { withUpwork } from "@/lib/upwork/client";
-import { fetchAccounts, type Account } from "@/lib/feed/run";
+import { accountLabel, activeProfile, fetchAccounts, type Account } from "@/lib/session";
 import { describeParams, listSearches } from "@/lib/feed/searches";
 import { getSettings } from "@/lib/feed/settings";
-import { deleteSearchAction, toggleSearchAction } from "../actions";
+import { deleteSearchAction, switchAccountAction, toggleSearchAction } from "../actions";
+import { inputClass } from "./fields";
 import { SearchForm } from "./search-form";
 import { SettingsForm } from "./settings-form";
 import { WriterForm, type ProfileSummary } from "./writer-form";
 import { DRAFT_MODEL, hasOpenAI, SCORING_MODEL } from "@/lib/ai/openai";
 import { tokenUsage } from "@/lib/feed/drafts";
 import { getProfileContext, getWriterNotes } from "@/lib/profile";
+import { Gated } from "../profile-gate";
 
 function profileSummary(): ProfileSummary | null {
   const ctx = getProfileContext();
@@ -30,16 +32,18 @@ function profileSummary(): ProfileSummary | null {
 
 export default function SettingsPage() {
   return (
-    <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
-      <h1 className="text-2xl font-semibold tracking-tight">Searches &amp; rules</h1>
-      <p className="mb-8 text-sm text-zinc-500">
-        Saved searches run on Upwork. Rules then filter the results here; filtered jobs stay visible under
-        &ldquo;Filtered out&rdquo; with the reason.
-      </p>
-      <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
-        <SettingsContent />
-      </Suspense>
-    </main>
+    <Gated>
+      <main className="mx-auto w-full max-w-5xl px-4 py-8 sm:px-6">
+        <h1 className="text-2xl font-semibold tracking-tight">Searches &amp; rules</h1>
+        <p className="mb-8 text-sm text-zinc-500">
+          Saved searches run on Upwork. Rules then filter the results here; filtered jobs stay visible under
+          &ldquo;Filtered out&rdquo; with the reason.
+        </p>
+        <Suspense fallback={<p className="text-sm text-zinc-500">Loading…</p>}>
+          <SettingsContent />
+        </Suspense>
+      </main>
+    </Gated>
   );
 }
 
@@ -52,16 +56,51 @@ async function loadAccounts(): Promise<Account[]> {
   }
 }
 
+const smallButton =
+  "rounded-md border border-zinc-300 px-2.5 py-1.5 text-xs hover:bg-zinc-100 dark:border-zinc-700 dark:hover:bg-zinc-800";
+
+/** Other orgs on the same Upwork login (e.g. an agency). Each has its own searches, jobs and settings. */
+async function AccountSwitcher() {
+  const active = activeProfile();
+  const accounts = await loadAccounts();
+  return (
+    <section>
+      <h2 className="mb-1 text-lg font-semibold">Upwork profile</h2>
+      <p className="mb-3 text-sm text-zinc-500">
+        Everything on these pages belongs to <strong className="text-zinc-700 dark:text-zinc-300">{active?.label}</strong>: its
+        searches, jobs, drafts, proposals and settings. Another profile keeps its own.
+      </p>
+      {accounts.length > 1 && (
+        <form action={switchAccountAction} className="flex flex-wrap items-center gap-2">
+          <select name="org_uid" defaultValue={active?.orgUid} className={`${inputClass} max-w-xs`}>
+            {accounts.map((a) => (
+              <option key={a.org_uid} value={a.org_uid}>
+                {accountLabel(a)}
+              </option>
+            ))}
+          </select>
+          <button className={smallButton}>Switch profile</button>
+        </form>
+      )}
+    </section>
+  );
+}
+
 async function SettingsContent() {
   await connection();
   const settings = getSettings();
   const searches = listSearches();
-  const accounts = await loadAccounts();
 
   return (
     <div className="grid gap-10">
+      <AccountSwitcher />
+
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Saved searches</h2>
+        <h2 className="mb-1 text-lg font-semibold">Saved searches</h2>
+        <p className="mb-3 text-sm text-zinc-500">
+          The first run set these up from your profile&apos;s skills. Add more below, or delete the ones you don&apos;t want; they
+          won&apos;t come back.
+        </p>
         {searches.length === 0 ? (
           <p className="mb-4 text-sm text-zinc-500">None yet. Add one below.</p>
         ) : (
@@ -125,8 +164,8 @@ async function SettingsContent() {
       </section>
 
       <section>
-        <h2 className="mb-3 text-lg font-semibold">Account, schedule &amp; rules</h2>
-        <SettingsForm settings={settings} accounts={accounts} />
+        <h2 className="mb-3 text-lg font-semibold">Schedule &amp; rules</h2>
+        <SettingsForm settings={settings} />
       </section>
     </div>
   );

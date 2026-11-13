@@ -1,15 +1,35 @@
 import "server-only";
-import { mkdirSync } from "node:fs";
+import { AsyncLocalStorage } from "node:async_hooks";
+import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-// One local SQLite file (.data/app.db, gitignored). node:sqlite is synchronous,
-// which is fine for a single-user local app; pages that read it call
-// connection() first so Next.js treats the data as per-request.
+// Local SQLite files under .data/ (gitignored):
+//
+//   session.db              who is logged in: OAuth tokens and the active profile
+//   profiles/<org_uid>.db   everything else, one file per Upwork profile (org):
+//                           settings, searches, jobs, scores, drafts, submissions
+//
+// db() opens the active profile's file. With no profile connected it throws, so
+// no page can show another profile's jobs. node:sqlite is synchronous, which is
+// fine for a single-user local app; pages that read it call connection() first
+// so Next.js treats the data as per-request.
 
 const DATA_DIR = path.join(process.cwd(), ".data");
+const PROFILES_DIR = path.join(DATA_DIR, "profiles");
+/** The single shared file used before profiles were split out. */
+export const LEGACY_DB = path.join(DATA_DIR, "app.db");
 
-const MIGRATIONS: string[] = [
+const SESSION_MIGRATIONS: string[] = [
+  `
+  CREATE TABLE kv (
+    key   TEXT PRIMARY KEY,
+    value TEXT NOT NULL
+  );
+  `,
+];
+
+const PROFILE_MIGRATIONS: string[] = [
   `
   CREATE TABLE kv (
     key   TEXT PRIMARY KEY,
@@ -142,21 +162,26 @@ const MIGRATIONS: string[] = [
   -- At most one submission per job can be in flight or sent: blocks double submits.
   CREATE UNIQUE INDEX submissions_one_live ON submissions (job_id) WHERE status IN ('submitting', 'submitted');
   `,
+  `
+  -- Points per rubric factor (skills, pay, client, competition, clarity); the
+  -- score is their sum. NULL for scores made before the rubric.
+  ALTER TABLE job_scores ADD COLUMN breakdown TEXT;
+  `,
 ];
 
-function open(): DatabaseSync {
-  mkdirSync(DATA_DIR, { recursive: true, mode: 0o700 });
-  const db = new DatabaseSync(path.join(DATA_DIR, "app.db"));
+function open(file: string): DatabaseSync {
+  mkdirSync(path.dirname(file), { recursive: true, mode: 0o700 });
+  const db = new DatabaseSync(file);
   db.exec("PRAGMA journal_mode = WAL; PRAGMA foreign_keys = ON; PRAGMA busy_timeout = 5000;");
   return db;
 }
 
-function migrate(db: DatabaseSync): void {
+function migrate(db: DatabaseSync, migrations: string[]): void {
   const { user_version: version } = db.prepare("PRAGMA user_version").get() as { user_version: number };
-  for (let v = version; v < MIGRATIONS.length; v++) {
+  for (let v = version; v < migrations.length; v++) {
     db.exec("BEGIN");
     try {
-      db.exec(MIGRATIONS[v]);
+      db.exec(migrations[v]);
       db.exec(`PRAGMA user_version = ${v + 1}`);
       db.exec("COMMIT");
     } catch (err) {
@@ -166,16 +191,76 @@ function migrate(db: DatabaseSync): void {
   }
 }
 
-// The connection survives dev-server hot reloads; the migration count is
-// tracked with it so a reload that adds a migration still applies it.
-const g = globalThis as unknown as { __appDb?: DatabaseSync; __appDbMigrations?: number };
-export function db(): DatabaseSync {
-  const conn = (g.__appDb ??= open());
-  if (g.__appDbMigrations !== MIGRATIONS.length) {
-    migrate(conn);
-    g.__appDbMigrations = MIGRATIONS.length;
+// Connections survive dev-server hot reloads; the migration count is tracked
+// with each one so a reload that adds a migration still applies it.
+type Conn = { db: DatabaseSync; migrations: number };
+const g = globalThis as unknown as { __dbConns?: Map<string, Conn> };
+
+function connect(file: string, migrations: string[]): DatabaseSync {
+  const conns = (g.__dbConns ??= new Map());
+  let conn = conns.get(file);
+  if (!conn) {
+    conn = { db: open(file), migrations: -1 };
+    conns.set(file, conn);
   }
-  return conn;
+  if (conn.migrations !== migrations.length) {
+    migrate(conn.db, migrations);
+    conn.migrations = migrations.length;
+  }
+  return conn.db;
+}
+
+/** Login state shared by every profile: OAuth tokens and which profile is active. */
+export function sessionDb(): DatabaseSync {
+  return connect(path.join(DATA_DIR, "session.db"), SESSION_MIGRATIONS);
+}
+
+/** Thrown when profile data is read while no Upwork profile is connected. */
+export class NoProfile extends Error {
+  constructor() {
+    super("No Upwork profile is connected.");
+  }
+}
+
+// Upwork org uids are numeric; anything else must never become a file name.
+export function profileFile(orgUid: string): string {
+  if (!/^[A-Za-z0-9_-]{1,64}$/.test(orgUid)) throw new Error(`Unexpected Upwork org id: ${orgUid}`);
+  return path.join(PROFILES_DIR, `${orgUid}.db`);
+}
+
+export function profileDbExists(orgUid: string): boolean {
+  return existsSync(profileFile(orgUid));
+}
+
+/** Opens (and creates) one profile's database. */
+export function openProfileDb(orgUid: string): DatabaseSync {
+  return connect(profileFile(orgUid), PROFILE_MIGRATIONS);
+}
+
+// A feed run binds its profile here, so switching accounts mid-run can't send
+// the rest of its writes to the other profile's file.
+const bound = new AsyncLocalStorage<string>();
+
+export function withProfile<T>(orgUid: string, fn: () => T): T {
+  return bound.run(orgUid, fn);
+}
+
+/** Session kv key holding the active profile ({ orgUid, label }); see session.ts. */
+export const ACTIVE_PROFILE_KEY = "profile";
+
+/** The org uid whose data is in scope right now, if any. */
+export function currentOrg(): string | undefined {
+  const pinned = bound.getStore();
+  if (pinned) return pinned;
+  const row = sessionDb().prepare("SELECT value FROM kv WHERE key = ?").get(ACTIVE_PROFILE_KEY) as { value: string } | undefined;
+  return row ? (JSON.parse(row.value) as { orgUid?: string }).orgUid : undefined;
+}
+
+/** The active profile's database. Throws NoProfile when nobody is connected. */
+export function db(): DatabaseSync {
+  const org = currentOrg();
+  if (!org) throw new NoProfile();
+  return openProfileDb(org);
 }
 
 export function transaction<T>(fn: () => T): T {
