@@ -1,0 +1,45 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'; script-src 'unsafe-inline'" />
+    <title>OpenAI API key</title>
+    <style>
+      :root { color-scheme: light dark; --bg: #fff; --fg: #18181b; --muted: #71717a; --border: #d4d4d8; --accent: #047857; }
+      @media (prefers-color-scheme: dark) { :root { --bg: #18181b; --fg: #f4f4f5; --muted: #a1a1aa; --border: #3f3f46; --accent: #34d399; } }
+      body { margin: 0; padding: 24px; font: 14px/1.5 system-ui, sans-serif; background: var(--bg); color: var(--fg); }
+      h1 { font-size: 16px; margin: 0 0 6px; }
+      p { margin: 0 0 14px; color: var(--muted); }
+      input { width: 100%; box-sizing: border-box; padding: 8px 10px; border: 1px solid var(--border); border-radius: 6px; background: transparent; color: inherit; font: 13px ui-monospace, monospace; }
+      .row { display: flex; gap: 8px; justify-content: flex-end; margin-top: 16px; }
+      button { padding: 7px 14px; border-radius: 6px; border: 1px solid var(--border); background: transparent; color: inherit; font: inherit; cursor: pointer; }
+      button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+      #status { font-size: 12px; margin-top: 8px; }
+    </style>
+  </head>
+  <body>
+    <h1>OpenAI API key</h1>
+    <p>Used for job scores and proposal drafts. It is stored only on this computer. You can skip this and add it later from File → Set OpenAI API key.</p>
+    <form id="form">
+      <input id="key" type="password" placeholder="sk-..." autocomplete="off" spellcheck="false" autofocus />
+      <div id="status"></div>
+      <div class="row">
+        <button type="button" id="skip">Skip</button>
+        <button type="submit" class="primary" id="save">Save</button>
+      </div>
+    </form>
+    <script>
+      const status = document.getElementById("status");
+      window.desktop.hasKey().then((has) => {
+        if (has) status.textContent = "A key is already saved. Enter a new one to replace it, or save empty to remove it.";
+      });
+      document.getElementById("skip").onclick = () => window.close();
+      document.getElementById("form").onsubmit = async (e) => {
+        e.preventDefault();
+        document.getElementById("save").disabled = true;
+        status.textContent = "Saving and restarting…";
+        await window.desktop.saveKey(document.getElementById("key").value);
+      };
+    </script>
+  </body>
+</html>

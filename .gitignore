@@ -42,3 +42,8 @@ next-env.d.ts
 
 # local app data (OAuth tokens, db)
 /.data/
+
+# desktop app (Electron)
+/desktop/node_modules
+/desktop/server
+/desktop/dist

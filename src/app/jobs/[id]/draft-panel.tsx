@@ -48,7 +48,7 @@ export function DraftPanel(props: Props) {
       <FormMessage state={detState} />
 
       {!props.aiReady ? (
-        <p className="text-sm text-amber-700">Add OPENAI_API_KEY to .env.local and restart the server to write drafts.</p>
+        <p className="text-sm text-amber-700">Add an OpenAI API key to write drafts (desktop app: menu → Set OpenAI API key; dev: OPENAI_API_KEY in .env.local).</p>
       ) : (
         <form action={generate} className="space-y-2">
           <input type="hidden" name="job_id" value={props.jobId} />

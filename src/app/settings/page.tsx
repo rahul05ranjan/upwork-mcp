@@ -159,7 +159,7 @@ async function SettingsContent() {
           profile, so add real facts that are missing. Models: scoring <code className="font-mono">{SCORING_MODEL}</code>, drafting{" "}
           <code className="font-mono">{DRAFT_MODEL}</code> (change in .env.local).
         </p>
-        {!hasOpenAI() && <p className="mb-4 text-sm text-amber-700">OPENAI_API_KEY is not set; AI features are off.</p>}
+        {!hasOpenAI() && <p className="mb-4 text-sm text-amber-700">No OpenAI API key is set, so AI features are off. In the desktop app use the menu → Set OpenAI API key.</p>}
         <WriterForm notes={getWriterNotes()} profile={profileSummary()} usage={tokenUsage()} />
       </section>
 

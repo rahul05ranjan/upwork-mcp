@@ -13,7 +13,7 @@ export function hasOpenAI(): boolean {
 
 const g = globalThis as unknown as { __openai?: OpenAI };
 export function openai(): OpenAI {
-  if (!hasOpenAI()) throw new Error("OPENAI_API_KEY is not set in .env.local");
+  if (!hasOpenAI()) throw new Error("No OpenAI API key is set (desktop app menu, or OPENAI_API_KEY in .env.local)");
   return (g.__openai ??= new OpenAI());
 }
 

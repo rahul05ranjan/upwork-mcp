@@ -1,0 +1,75 @@
+{
+  "name": "upwork-job-dashboard",
+  "productName": "Upwork Job Dashboard",
+  "version": "0.1.0",
+  "description": "Upwork job feed, AI drafts and approved submissions, running on your own computer.",
+  "author": "itechnolabs",
+  "private": true,
+  "main": "main.js",
+  "scripts": {
+    "prepare-server": "node scripts/prepare-server.mjs",
+    "start": "npm run prepare-server && electron .",
+    "dist": "npm run prepare-server && electron-builder",
+    "dist:mac": "npm run prepare-server && electron-builder --mac",
+    "dist:win": "npm run prepare-server && electron-builder --win",
+    "dist:linux": "npm run prepare-server && electron-builder --linux"
+  },
+  "devDependencies": {
+    "electron": "45.3.3",
+    "electron-builder": "26.18.0"
+  },
+  "build": {
+    "appId": "tech.itechnolabs.upwork-job-dashboard",
+    "productName": "Upwork Job Dashboard",
+    "directories": {
+      "output": "dist"
+    },
+    "files": [
+      "main.js",
+      "preload.js",
+      "key.html",
+      "package.json"
+    ],
+    "afterPack": "scripts/after-pack.cjs",
+    "mac": {
+      "category": "public.app-category.productivity",
+      "target": [
+        {
+          "target": "dmg",
+          "arch": [
+            "arm64",
+            "x64"
+          ]
+        }
+      ],
+      "identity": "-",
+      "hardenedRuntime": false
+    },
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    },
+    "nsis": {
+      "oneClick": false,
+      "perMachine": false,
+      "allowToChangeInstallationDirectory": true
+    },
+    "linux": {
+      "category": "Office",
+      "target": [
+        {
+          "target": "AppImage",
+          "arch": [
+            "x64"
+          ]
+        }
+      ]
+    }
+  }
+}

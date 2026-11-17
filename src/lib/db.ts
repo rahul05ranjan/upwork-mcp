@@ -4,7 +4,8 @@ import { existsSync, mkdirSync } from "node:fs";
 import path from "node:path";
 import { DatabaseSync } from "node:sqlite";
 
-// Local SQLite files under .data/ (gitignored):
+// Local SQLite files under .data/ (gitignored), or under APP_DATA_DIR when set
+// (the desktop app points it at the user's app-data folder):
 //
 //   session.db              who is logged in: OAuth tokens and the active profile
 //   profiles/<org_uid>.db   everything else, one file per Upwork profile (org):
@@ -15,7 +16,7 @@ import { DatabaseSync } from "node:sqlite";
 // fine for a single-user local app; pages that read it call connection() first
 // so Next.js treats the data as per-request.
 
-const DATA_DIR = path.join(process.cwd(), ".data");
+const DATA_DIR = process.env.APP_DATA_DIR ?? path.join(process.cwd(), ".data");
 const PROFILES_DIR = path.join(DATA_DIR, "profiles");
 /** The single shared file used before profiles were split out. */
 export const LEGACY_DB = path.join(DATA_DIR, "app.db");
