@@ -41,6 +41,17 @@ async function patch(update: Partial<AuthState>): Promise<void> {
 }
 
 export const CALLBACK_PATH = "/api/upwork/callback";
+export const CLIENT_METADATA_PATH = "/oauth/client-metadata.json";
+
+/**
+ * Upwork's dynamic client registration only accepts localhost redirect URIs.
+ * A hosted (https) deployment instead identifies itself with a Client ID
+ * Metadata Document: the client_id is the URL of a JSON file this app serves.
+ */
+export function clientMetadataUrl(): string | undefined {
+  const base = new URL(appUrl());
+  return base.protocol === "https:" ? new URL(CLIENT_METADATA_PATH, base).toString() : undefined;
+}
 
 /**
  * OAuth 2.1 client for Upwork's MCP server, persisted to the local store.
@@ -54,6 +65,10 @@ export class UpworkAuthProvider implements OAuthClientProvider {
 
   get redirectUrl() {
     return new URL(CALLBACK_PATH, appUrl()).toString();
+  }
+
+  get clientMetadataUrl() {
+    return clientMetadataUrl();
   }
 
   get clientMetadata(): OAuthClientMetadata {
